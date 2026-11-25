@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import tempfile
 from pathlib import Path
 from typing import Callable, Optional
@@ -9,13 +10,20 @@ import cv2
 import numpy as np
 import streamlit as st
 import torch
+from streamlit.errors import StreamlitSecretNotFoundError
 
 from utils import load_model, replace_background
 
 
 @st.cache_resource(show_spinner="Loading the background-removal model...")
 def get_model() -> tuple[torch.nn.Module, torch.device]:
-    return load_model()
+    repo_id = os.environ.get("MODEL_REPO_ID")
+    if not repo_id:
+        try:
+            repo_id = st.secrets["MODEL_REPO_ID"]
+        except (KeyError, StreamlitSecretNotFoundError):
+            repo_id = None
+    return load_model(repo_id=repo_id)
 
 
 def process_video(

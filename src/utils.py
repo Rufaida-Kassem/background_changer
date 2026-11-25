@@ -6,10 +6,11 @@ import numpy as np
 import torch
 
 
+MODEL_FILENAME = "deeplabv3_background_segmentation.pt"
 MODEL_PATH = (
     Path(__file__).resolve().parent.parent
     / "model"
-    / "deeplabv3_background_segmentation.pt"
+    / MODEL_FILENAME
 )
 INPUT_SIZE = (256, 256)
 IMAGE_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
@@ -18,10 +19,37 @@ IMAGE_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
 
 def load_model(
     model_path: Optional[Path] = None,
+    repo_id: Optional[str] = None,
 ) -> Tuple[torch.nn.Module, torch.device]:
-    """Load the exported TorchScript person-segmentation model."""
-    path = model_path if model_path is not None else MODEL_PATH
+    """Load the TorchScript model locally or from a public Hugging Face repo."""
+    if model_path is not None:
+        path = model_path
+    elif repo_id:
+        from huggingface_hub import hf_hub_download
+        from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
+
+        try:
+            path = Path(
+                hf_hub_download(
+                    repo_id=repo_id,
+                    filename=MODEL_FILENAME,
+                    repo_type="model",
+                )
+            )
+        except (EntryNotFoundError, HfHubHTTPError, ValueError) as error:
+            raise RuntimeError(
+                f"Could not download '{MODEL_FILENAME}' from Hugging Face "
+                f"model repo '{repo_id}'. Check the repo ID and uploaded filename."
+            ) from error
+    else:
+        path = MODEL_PATH
+
     if not path.is_file():
+        if model_path is None and not repo_id:
+            raise FileNotFoundError(
+                f"Segmentation model not found at {path}. Set MODEL_REPO_ID in "
+                "Streamlit Secrets or place the model at this path."
+            )
         raise FileNotFoundError(f"Segmentation model not found: {path}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
