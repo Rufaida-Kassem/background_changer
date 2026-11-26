@@ -3,3 +3,4 @@ opencv-python-headless
 huggingface_hub
 streamlit
 torch
+torchvision

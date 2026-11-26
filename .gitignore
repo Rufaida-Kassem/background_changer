@@ -226,3 +226,4 @@ model/*.pt
 .streamlit/secrets.toml
 /outputs/*
 /logs/*
+/data/*
