@@ -26,7 +26,7 @@
 - 📷 **Photo background replacement**: process a single photo and download the result as a PNG.
 - 🎥 **Common video formats**: MP4, MOV, AVI, MKV, and WEBM.
 - 🧍 **Person segmentation**: a fine-tuned U-Net (ResNet-34) binary model separates the person from the original background by default. DeepLabV3 (ResNet-50) is also supported.
-- 🪄 **Soft edges**: the mask is blended with alpha (not a hard cut-out) and slightly blurred, so edges look natural instead of jagged.
+- 🪄 **Edge-aware mask refinement**: the mask is eroded, sharpened with a smooth transition, and refined against image edges with a guided filter.
 - 📊 **Progress tracking**: see processing progress while your video is rendered.
 - ⬇️ **Preview and download**: watch the result in the app and save it as an MP4.
 - ⚡ **GPU when available**: uses CUDA if present, otherwise falls back to CPU.
@@ -39,7 +39,7 @@ flowchart LR
     B[Input video] --> C[Read frame]
     C --> E[Resize and normalize]
     E --> M[Segmentation model<br/>person mask]
-    M --> S[Resize mask to frame<br/>and smooth edges]
+    M --> S[Resize and refine mask<br/>with guided filter]
     A[Background image<br/>resized to frame] --> D
     S --> D[Alpha composite<br/>person over background]
     C --> D
@@ -51,7 +51,7 @@ For every frame the app:
 
 1. Resizes it to the selected model's input size (384×384 for U-Net or 256×256 for DeepLabV3) and normalizes it with ImageNet statistics.
 2. Runs the TorchScript model and applies a sigmoid to get a per-pixel person probability.
-3. Resizes the mask back to the frame size and smooths it with a Gaussian blur.
+3. Resizes the mask to the frame, erodes it slightly, sharpens its transition, and refines it with the notebook's guided filter.
 4. Blends the frame and the background: `output = frame × mask + background × (1 − mask)`.
 
 ### Model details

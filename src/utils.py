@@ -4,6 +4,8 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 import torch
+from PIL import Image
+from torchvision.transforms import functional as transforms_functional
 
 
 MODEL_FILENAME = "deeplabv3_background_segmentation.pt"
@@ -13,8 +15,6 @@ MODEL_PATH = MODEL_DIR / MODEL_FILENAME
 UNET_MODEL_PATH = MODEL_DIR / UNET_MODEL_FILENAME
 INPUT_SIZE = (256, 256)
 UNET_INPUT_SIZE = (384, 384)
-IMAGE_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
-IMAGE_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
 
 
 def load_model(
@@ -65,16 +65,20 @@ def predict_person_mask(
     device: torch.device,
     input_size: tuple[int, int] = INPUT_SIZE,
 ) -> np.ndarray:
-    """Return a smoothed person mask with the same dimensions as the BGR frame."""
+    """Return the raw person-probability mask at the frame's dimensions."""
     height, width = frame.shape[:2]
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    resized = cv2.resize(rgb_frame, input_size, interpolation=cv2.INTER_LINEAR)
-    normalized = (resized.astype(np.float32) / 255.0 - IMAGE_MEAN) / IMAGE_STD
-    input_tensor = (
-        torch.from_numpy(normalized.transpose(2, 0, 1))
-        .unsqueeze(0)
-        .to(device)
+    resized = transforms_functional.resize(
+        Image.fromarray(rgb_frame),
+        (input_size[1], input_size[0]),
     )
+    input_tensor = transforms_functional.to_tensor(resized)
+    input_tensor = transforms_functional.normalize(
+        input_tensor,
+        mean=(0.485, 0.456, 0.406),
+        std=(0.229, 0.224, 0.225),
+    )
+    input_tensor = input_tensor.unsqueeze(0).to(device)
 
     with torch.inference_mode():
         output = model(input_tensor)
@@ -87,8 +91,28 @@ def predict_person_mask(
         raise RuntimeError("The segmentation model did not return a tensor mask.")
 
     mask = torch.sigmoid(output).squeeze().cpu().numpy()
-    mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR)
-    return cv2.GaussianBlur(mask, (15, 15), 0)
+    return cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR)
+
+
+def guided_filter(
+    guide: np.ndarray,
+    src: np.ndarray,
+    r: int = 8,
+    eps: float = 1e-3,
+) -> np.ndarray:
+    """Refine a mask against image edges using the notebook's guided filter."""
+    kernel_size = (2 * r + 1, 2 * r + 1)
+
+    def mean(image: np.ndarray) -> np.ndarray:
+        return cv2.boxFilter(image, -1, kernel_size)
+
+    mean_guide = mean(guide)
+    mean_src = mean(src)
+    covariance = mean(guide * src) - mean_guide * mean_src
+    variance = mean(guide * guide) - mean_guide * mean_guide
+    coefficient = covariance / (variance + eps)
+    intercept = mean_src - coefficient * mean_guide
+    return mean(coefficient) * guide + mean(intercept)
 
 
 def replace_background(
@@ -98,14 +122,32 @@ def replace_background(
     device: torch.device,
     input_size: tuple[int, int] = INPUT_SIZE,
 ) -> np.ndarray:
-    """Composite the person in a BGR frame over a replacement BGR background."""
+    """Composite a BGR frame using the notebook's refined person mask."""
     height, width = frame.shape[:2]
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    rgb_background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
     mask = predict_person_mask(frame, model, device, input_size)
-    background = cv2.resize(
-        background, (width, height), interpolation=cv2.INTER_LINEAR
+    erosion_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (2 * 3 + 1, 2 * 3 + 1)
     )
-    alpha = mask[:, :, np.newaxis]
-    composite = frame.astype(np.float32) * alpha + background.astype(np.float32) * (
-        1.0 - alpha
+    alpha = cv2.erode(mask, erosion_kernel)
+
+    low, high = 0.35, 0.65
+    alpha = np.clip((alpha - low) / (high - low), 0, 1)
+    alpha = alpha * alpha * (3 - 2 * alpha)
+
+    guide = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+    alpha = np.clip(
+        guided_filter(guide, alpha.astype(np.float32), r=8, eps=1e-3),
+        0,
+        1,
     )
-    return np.clip(composite, 0, 255).astype(np.uint8)
+
+    resized_background = cv2.resize(rgb_background, (width, height))
+    alpha = alpha[:, :, np.newaxis]
+    composite = (
+        rgb_frame.astype(np.float32) * alpha
+        + resized_background.astype(np.float32) * (1.0 - alpha)
+    )
+    composite = np.clip(composite, 0, 255).astype(np.uint8)
+    return cv2.cvtColor(composite, cv2.COLOR_RGB2BGR)
