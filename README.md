@@ -2,7 +2,7 @@
 
 # 🎬 Video Background Changer
 
-**Replace the background of a recorded video with any image, powered by a fine-tuned DeepLabV3 person segmentation model.**
+**Replace the background of a recorded video with any image, powered by a fine-tuned person-segmentation model.**
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://background-changer.streamlit.app/)
 [![Model on Hugging Face](https://img.shields.io/badge/Model-Hugging%20Face-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/rufaidakassem/deeplabv3_background_segmentation)
@@ -24,7 +24,7 @@
 
 - 🖼️ **Any background image**: PNG, JPG/JPEG, WEBP, and BMP.
 - 🎥 **Common video formats**: MP4, MOV, AVI, MKV, and WEBM.
-- 🧍 **Person segmentation**: a fine-tuned DeepLabV3 (ResNet-50) binary model separates the person from the original background, then composites them over your chosen image.
+- 🧍 **Person segmentation**: a fine-tuned U-Net (ResNet-34) binary model separates the person from the original background by default. DeepLabV3 (ResNet-50) is also supported.
 - 🪄 **Soft edges**: the mask is blended with alpha (not a hard cut-out) and slightly blurred, so edges look natural instead of jagged.
 - 📊 **Progress tracking**: see processing progress while your video is rendered.
 - ⬇️ **Preview and download**: watch the result in the app and save it as an MP4.
@@ -36,8 +36,8 @@
 ```mermaid
 flowchart LR
     B[Input video] --> C[Read frame]
-    C --> E[Resize to 256×256<br/>and normalize]
-    E --> M[DeepLabV3<br/>person mask]
+    C --> E[Resize and normalize]
+    E --> M[Segmentation model<br/>person mask]
     M --> S[Resize mask to frame<br/>and smooth edges]
     A[Background image<br/>resized to frame] --> D
     S --> D[Alpha composite<br/>person over background]
@@ -48,22 +48,22 @@ flowchart LR
 
 For every frame the app:
 
-1. Resizes it to 256×256 and normalizes it with ImageNet statistics.
+1. Resizes it to the selected model's input size (384×384 for U-Net or 256×256 for DeepLabV3) and normalizes it with ImageNet statistics.
 2. Runs the TorchScript model and applies a sigmoid to get a per-pixel person probability.
 3. Resizes the mask back to the frame size and smooths it with a Gaussian blur.
 4. Blends the frame and the background: `output = frame × mask + background × (1 − mask)`.
 
 ### Model details
 
-| Item           | Value                                                                                      |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| Architecture   | DeepLabV3 with a ResNet-50 backbone (torchvision), pretrained weights, 1-channel head      |
-| Task           | Binary segmentation (person vs. background)                                                |
-| Input size     | 256 × 256, ImageNet mean/std normalization                                                 |
-| Loss           | `BCEWithLogitsLoss`                                                                        |
-| Optimizer      | Adam, learning rate `1e-4`                                                                 |
-| Training setup | 85/15 train/validation split, up to 15 epochs, early stopping (patience 3)                 |
-| Export         | Best validation checkpoint saved as a TorchScript file                                     |
+| Item           | Value                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Architecture   | U-Net with a ResNet-34 encoder by default; DeepLabV3 with a ResNet-50 backbone is also supported                           |
+| Task           | Binary segmentation (person vs. background)                                                                                |
+| Input size     | U-Net: 384 × 384; DeepLabV3: 256 × 256; both use ImageNet mean/std normalization                                           |
+| Loss           | U-Net: BCE + Dice; DeepLabV3: `BCEWithLogitsLoss`                                                                          |
+| Optimizer      | Adam, learning rate `1e-4`                                                                                                 |
+| Training setup | 85/15 train/validation split, up to 15 epochs, early stopping (patience 3)                                                |
+| Export         | Best validation checkpoint saved as a TorchScript file                                                                    |
 | Dataset        | [Supervisely filtered person segmentation](https://www.kaggle.com/datasets/tapakah68/supervisely-filtered-segmentation-person-dataset) |
 
 ---
@@ -94,20 +94,14 @@ python -m pip install torch torchvision
 python -m pip install -r requirements.txt
 ```
 
-### 2. Get the model
+### 2. Configure the model
 
-The trained model is excluded from Git. It is hosted on Hugging Face:
-**[rufaidakassem/deeplabv3_background_segmentation](https://huggingface.co/rufaidakassem/deeplabv3_background_segmentation)**
-
-Choose one of the options below.
-
-**Option A: load it from Hugging Face (recommended).** The model is downloaded and cached on first use. No token is needed for a public repository.
+The app uses `model/unet_background_segmentation.pt` by default. Both model files are excluded from Git. For local development, place the U-Net file at that path. To load either model from Hugging Face, set `MODEL_REPO_ID` to a repository containing the corresponding filename. The existing DeepLabV3 model is hosted at [rufaidakassem/deeplabv3_background_segmentation](https://huggingface.co/rufaidakassem/deeplabv3_background_segmentation).
 
 <details open>
 <summary>Windows (PowerShell)</summary>
 
 ```powershell
-$env:MODEL_REPO_ID = "rufaidakassem/deeplabv3_background_segmentation"
 python -m streamlit run src/app.py
 ```
 
@@ -117,13 +111,12 @@ python -m streamlit run src/app.py
 <summary>macOS / Linux</summary>
 
 ```bash
-export MODEL_REPO_ID="rufaidakassem/deeplabv3_background_segmentation"
 python -m streamlit run src/app.py
 ```
 
 </details>
 
-**Option B: use a local file.** Download `deeplabv3_background_segmentation.pt` and place it at `model/deeplabv3_background_segmentation.pt`. If `MODEL_REPO_ID` is not set, the app looks there by default.
+To select DeepLabV3 explicitly, set `MODEL_TYPE=deeplabv3` before launching (in PowerShell: `$env:MODEL_TYPE = "deeplabv3"`). `MODEL_TYPE` defaults to U-Net even when `MODEL_REPO_ID` is set, so use `MODEL_TYPE=unet` with a repository containing `unet_background_segmentation.pt` to load U-Net from Hugging Face.
 
 ### 3. Run the app
 
@@ -138,8 +131,11 @@ Open the local URL printed by Streamlit, upload a background image and a video, 
 In your app's **Settings → Secrets**, add:
 
 ```toml
+MODEL_TYPE = "deeplabv3"
 MODEL_REPO_ID = "rufaidakassem/deeplabv3_background_segmentation"
 ```
+
+For U-Net, use `MODEL_TYPE = "unet"` and a Hugging Face repository containing `unet_background_segmentation.pt`.
 
 ---
 
