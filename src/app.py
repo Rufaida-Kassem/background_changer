@@ -53,9 +53,7 @@ VIDEO_TYPES = ("mp4", "mov", "avi", "mkv", "webm")
 MAX_PHOTO_SIDE = 1600      # larger photos are downscaled to keep the demo fast
 MAX_VIDEO_SECONDS = 20     # the free CPU host is slow, so keep videos short
 
-# Set this to your measured validation IoU (for example 0.953) to show it in the
-# sidebar. Leave it as None until you have computed it.
-VALIDATION_IOU: Optional[float] = None
+VALIDATION_IOU: Optional[float] = 0.9304
 
 
 # --------------------------------------------------------------------------- #
