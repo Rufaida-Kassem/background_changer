@@ -453,7 +453,7 @@ def photo_tab(settings: RefineSettings) -> None:
         choice = pick_background("photo")
 
     if photo_bytes is None or choice is None:
-        st.info("Pick a sample or upload a photo and a background to see the result.")
+        st.info("Upload a photo and a background to see the result.")
         return
 
     try:
