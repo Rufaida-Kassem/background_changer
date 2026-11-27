@@ -12,18 +12,55 @@ import streamlit as st
 import torch
 from streamlit.errors import StreamlitSecretNotFoundError
 
-from utils import load_model, replace_background
+from utils import (
+    INPUT_SIZE,
+    MODEL_FILENAME,
+    UNET_INPUT_SIZE,
+    UNET_MODEL_FILENAME,
+    UNET_MODEL_PATH,
+    load_model,
+    replace_background,
+)
+
+DEFAULT_MODEL_TYPE = "unet"
+SUPPORTED_MODEL_TYPES = {"unet", "deeplabv3"}
+
+
+def _get_setting(name: str) -> Optional[str]:
+    value = os.environ.get(name)
+    if value:
+        return value
+    try:
+        return st.secrets[name]
+    except (KeyError, StreamlitSecretNotFoundError):
+        return None
 
 
 @st.cache_resource(show_spinner="Loading the background-removal model...")
-def get_model() -> tuple[torch.nn.Module, torch.device]:
-    repo_id = os.environ.get("MODEL_REPO_ID")
-    if not repo_id:
-        try:
-            repo_id = st.secrets["MODEL_REPO_ID"]
-        except (KeyError, StreamlitSecretNotFoundError):
-            repo_id = None
-    return load_model(repo_id=repo_id)
+def get_model() -> tuple[torch.nn.Module, torch.device, tuple[int, int]]:
+    repo_id = _get_setting("MODEL_REPO_ID")
+    model_type = _get_setting("MODEL_TYPE")
+    if model_type is None:
+        model_type = DEFAULT_MODEL_TYPE
+    model_type = model_type.strip().lower()
+    if model_type not in SUPPORTED_MODEL_TYPES:
+        supported_types = ", ".join(sorted(SUPPORTED_MODEL_TYPES))
+        raise ValueError(
+            f"Unsupported MODEL_TYPE '{model_type}'. Choose from: {supported_types}."
+        )
+
+    if model_type == "unet":
+        if repo_id:
+            model, device = load_model(
+                repo_id=repo_id,
+                filename=UNET_MODEL_FILENAME,
+            )
+        else:
+            model, device = load_model(model_path=UNET_MODEL_PATH)
+        return model, device, UNET_INPUT_SIZE
+
+    model, device = load_model(repo_id=repo_id, filename=MODEL_FILENAME)
+    return model, device, INPUT_SIZE
 
 
 def process_video(
@@ -33,6 +70,8 @@ def process_video(
     model: torch.nn.Module,
     device: torch.device,
     progress_callback: Optional[Callable[[float], None]] = None,
+    *,
+    input_size: tuple[int, int] = INPUT_SIZE,
 ) -> bytes:
     suffix = Path(video_name).suffix or ".mp4"
 
@@ -78,7 +117,9 @@ def process_video(
             while success and frame is not None:
                 if frame.shape[:2] != (height, width):
                     frame = cv2.resize(frame, (width, height))
-                result = replace_background(frame, background, model, device)
+                result = replace_background(
+                    frame, background, model, device, input_size
+                )
                 if (output_height, output_width) != (height, width):
                     result = cv2.copyMakeBorder(
                         result,
@@ -142,7 +183,7 @@ def main() -> None:
     if st.button("Replace background", type="primary"):
         progress = st.progress(0.0, text="Processing video frames...")
         try:
-            model, device = get_model()
+            model, device, input_size = get_model()
             processed_video = process_video(
                 video_bytes,
                 video_file.name,
@@ -152,6 +193,7 @@ def main() -> None:
                 progress_callback=lambda value: progress.progress(
                     value, text="Processing video frames..."
                 ),
+                input_size=input_size,
             )
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
             st.error(f"Could not process the uploaded video: {error}")
