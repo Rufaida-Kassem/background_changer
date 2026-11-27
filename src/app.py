@@ -23,6 +23,7 @@ from utils import (
 )
 
 DEFAULT_MODEL_TYPE = "unet"
+DEFAULT_UNET_REPO_ID = "rufaidakassem/unet_background_segmentation"
 SUPPORTED_MODEL_TYPES = {"unet", "deeplabv3"}
 
 
@@ -55,8 +56,13 @@ def get_model() -> tuple[torch.nn.Module, torch.device, tuple[int, int]]:
                 repo_id=repo_id,
                 filename=UNET_MODEL_FILENAME,
             )
-        else:
+        elif UNET_MODEL_PATH.is_file():
             model, device = load_model(model_path=UNET_MODEL_PATH)
+        else:
+            model, device = load_model(
+                repo_id=DEFAULT_UNET_REPO_ID,
+                filename=UNET_MODEL_FILENAME,
+            )
         return model, device, UNET_INPUT_SIZE
 
     model, device = load_model(repo_id=repo_id, filename=MODEL_FILENAME)

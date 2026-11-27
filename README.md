@@ -96,7 +96,7 @@ python -m pip install -r requirements.txt
 
 ### 2. Configure the model
 
-The app uses `model/unet_background_segmentation.pt` by default. Both model files are excluded from Git. For local development, place the U-Net file at that path. To load either model from Hugging Face, set `MODEL_REPO_ID` to a repository containing the corresponding filename. The existing DeepLabV3 model is hosted at [rufaidakassem/deeplabv3_background_segmentation](https://huggingface.co/rufaidakassem/deeplabv3_background_segmentation).
+The app uses U-Net by default. It loads `model/unet_background_segmentation.pt` when that local file exists; otherwise it downloads `unet_background_segmentation.pt` from [rufaidakassem/unet_background_segmentation](https://huggingface.co/rufaidakassem/unet_background_segmentation). Both model files are excluded from Git. Set `MODEL_REPO_ID` to use a different Hugging Face repository containing the selected model's filename. The existing DeepLabV3 model is hosted at [rufaidakassem/deeplabv3_background_segmentation](https://huggingface.co/rufaidakassem/deeplabv3_background_segmentation).
 
 <details open>
 <summary>Windows (PowerShell)</summary>
@@ -116,7 +116,7 @@ python -m streamlit run src/app.py
 
 </details>
 
-To select DeepLabV3 explicitly, set `MODEL_TYPE=deeplabv3` before launching (in PowerShell: `$env:MODEL_TYPE = "deeplabv3"`). `MODEL_TYPE` defaults to U-Net even when `MODEL_REPO_ID` is set, so use `MODEL_TYPE=unet` with a repository containing `unet_background_segmentation.pt` to load U-Net from Hugging Face.
+To select DeepLabV3 explicitly, set `MODEL_TYPE=deeplabv3` before launching (in PowerShell: `$env:MODEL_TYPE = "deeplabv3"`). If `MODEL_REPO_ID` is set, it must contain the filename for the selected model.
 
 ### 3. Run the app
 
@@ -128,14 +128,12 @@ Open the local URL printed by Streamlit, upload a background image and a video, 
 
 ### ☁️ Deploying on Streamlit Community Cloud
 
-In your app's **Settings → Secrets**, add:
+No secrets are needed for the default U-Net deployment. To select the hosted DeepLabV3 model, add:
 
 ```toml
 MODEL_TYPE = "deeplabv3"
 MODEL_REPO_ID = "rufaidakassem/deeplabv3_background_segmentation"
 ```
-
-For U-Net, use `MODEL_TYPE = "unet"` and a Hugging Face repository containing `unet_background_segmentation.pt`.
 
 ---
 
