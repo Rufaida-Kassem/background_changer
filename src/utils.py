@@ -16,6 +16,11 @@ UNET_MODEL_PATH = MODEL_DIR / UNET_MODEL_FILENAME
 INPUT_SIZE = (256, 256)
 UNET_INPUT_SIZE = (384, 384)
 
+# Default edge-refinement settings (these reproduce the previous fixed behaviour).
+DEFAULT_EROSION = 3
+DEFAULT_SOFTNESS = 0.30
+DEFAULT_RADIUS = 8
+
 
 def load_model(
     model_path: Optional[Path] = None,
@@ -100,7 +105,7 @@ def guided_filter(
     r: int = 8,
     eps: float = 1e-3,
 ) -> np.ndarray:
-    """Refine a mask against image edges using the notebook's guided filter."""
+    """Refine a mask against image edges using a guided filter."""
     kernel_size = (2 * r + 1, 2 * r + 1)
 
     def mean(image: np.ndarray) -> np.ndarray:
@@ -115,39 +120,64 @@ def guided_filter(
     return mean(coefficient) * guide + mean(intercept)
 
 
+def refine_alpha(
+    mask: np.ndarray,
+    frame: np.ndarray,
+    erosion: int = DEFAULT_EROSION,
+    softness: float = DEFAULT_SOFTNESS,
+    radius: int = DEFAULT_RADIUS,
+    eps: float = 1e-3,
+) -> np.ndarray:
+    """Turn a raw probability mask into a clean alpha matte.
+
+    1. Erode slightly to remove the halo of the old background.
+    2. Sharpen the transition with a smoothstep around 0.5 (``softness`` is the
+       width of that transition).
+    3. Snap the edge to real image edges (hair) with a guided filter.
+
+    ``frame`` is the BGR image the mask was predicted from.
+    """
+    alpha = mask.astype(np.float32)
+    if erosion > 0:
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (2 * erosion + 1, 2 * erosion + 1)
+        )
+        alpha = cv2.erode(alpha, kernel)
+
+    softness = float(np.clip(softness, 0.02, 1.0))
+    low, high = 0.5 - softness / 2, 0.5 + softness / 2
+    alpha = np.clip((alpha - low) / (high - low), 0, 1)
+    alpha = alpha * alpha * (3 - 2 * alpha)
+
+    guide = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+    alpha = guided_filter(guide, alpha.astype(np.float32), r=max(int(radius), 1), eps=eps)
+    return np.clip(alpha, 0, 1)
+
+
+def composite(frame: np.ndarray, background: np.ndarray, alpha: np.ndarray) -> np.ndarray:
+    """Alpha-blend a BGR frame over a BGR background (resized to the frame)."""
+    height, width = frame.shape[:2]
+    resized_background = cv2.resize(background, (width, height))
+    alpha = alpha[:, :, np.newaxis]
+    blended = (
+        frame.astype(np.float32) * alpha
+        + resized_background.astype(np.float32) * (1.0 - alpha)
+    )
+    return np.clip(blended, 0, 255).astype(np.uint8)
+
+
 def replace_background(
     frame: np.ndarray,
     background: np.ndarray,
     model: torch.nn.Module,
     device: torch.device,
     input_size: tuple[int, int] = INPUT_SIZE,
+    *,
+    erosion: int = DEFAULT_EROSION,
+    softness: float = DEFAULT_SOFTNESS,
+    radius: int = DEFAULT_RADIUS,
 ) -> np.ndarray:
-    """Composite a BGR frame using the notebook's refined person mask."""
-    height, width = frame.shape[:2]
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    rgb_background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
+    """Composite a BGR frame over ``background`` using the refined person mask."""
     mask = predict_person_mask(frame, model, device, input_size)
-    erosion_kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (2 * 3 + 1, 2 * 3 + 1)
-    )
-    alpha = cv2.erode(mask, erosion_kernel)
-
-    low, high = 0.35, 0.65
-    alpha = np.clip((alpha - low) / (high - low), 0, 1)
-    alpha = alpha * alpha * (3 - 2 * alpha)
-
-    guide = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
-    alpha = np.clip(
-        guided_filter(guide, alpha.astype(np.float32), r=8, eps=1e-3),
-        0,
-        1,
-    )
-
-    resized_background = cv2.resize(rgb_background, (width, height))
-    alpha = alpha[:, :, np.newaxis]
-    composite = (
-        rgb_frame.astype(np.float32) * alpha
-        + resized_background.astype(np.float32) * (1.0 - alpha)
-    )
-    composite = np.clip(composite, 0, 255).astype(np.uint8)
-    return cv2.cvtColor(composite, cv2.COLOR_RGB2BGR)
+    alpha = refine_alpha(mask, frame, erosion, softness, radius)
+    return composite(frame, background, alpha)
