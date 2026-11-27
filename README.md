@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🎬 Video Background Changer
+# 🎬 Photo & Video Background Changer
 
-**Replace the background of a recorded video with any image, powered by a fine-tuned person-segmentation model.**
+**Replace the background in a photo or recorded video with any image, powered by a fine-tuned person-segmentation model.**
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://background-changer.streamlit.app/)
 [![Model on Hugging Face](https://img.shields.io/badge/Model-Hugging%20Face-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/rufaidakassem/deeplabv3_background_segmentation)
@@ -23,6 +23,7 @@
 ## ✨ Features
 
 - 🖼️ **Any background image**: PNG, JPG/JPEG, WEBP, and BMP.
+- 📷 **Photo background replacement**: process a single photo and download the result as a PNG.
 - 🎥 **Common video formats**: MP4, MOV, AVI, MKV, and WEBM.
 - 🧍 **Person segmentation**: a fine-tuned U-Net (ResNet-34) binary model separates the person from the original background by default. DeepLabV3 (ResNet-50) is also supported.
 - 🪄 **Soft edges**: the mask is blended with alpha (not a hard cut-out) and slightly blurred, so edges look natural instead of jagged.
@@ -124,7 +125,7 @@ To select DeepLabV3 explicitly, set `MODEL_TYPE=deeplabv3` before launching (in 
 python -m streamlit run src/app.py
 ```
 
-Open the local URL printed by Streamlit, upload a background image and a video, click **Replace background**, then preview or download the processed MP4.
+Open the local URL printed by Streamlit, choose Photo or Video, upload the media and replacement background, then click **Replace background** to preview or download the result.
 
 ### ☁️ Deploying on Streamlit Community Cloud
 

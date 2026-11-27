@@ -155,21 +155,50 @@ def process_video(
         return output_path.read_bytes()
 
 
+def process_photo(
+    photo_bytes: bytes,
+    background: np.ndarray,
+    model: torch.nn.Module,
+    device: torch.device,
+    input_size: tuple[int, int] = INPUT_SIZE,
+) -> bytes:
+    photo_data = np.frombuffer(photo_bytes, dtype=np.uint8)
+    photo = cv2.imdecode(photo_data, cv2.IMREAD_COLOR)
+    if photo is None:
+        raise ValueError("The uploaded photo could not be decoded as an image.")
+
+    result = replace_background(photo, background, model, device, input_size)
+    success, encoded = cv2.imencode(".png", result)
+    if not success:
+        raise RuntimeError("Could not encode the processed photo as PNG.")
+    return encoded.tobytes()
+
+
 def main() -> None:
-    st.set_page_config(page_title="Video Background Changer")
-    st.title("Video Background Changer")
-    st.write("Upload a background image and a recorded video to replace its background.")
+    st.set_page_config(page_title="Photo & Video Background Changer")
+    st.title("Photo & Video Background Changer")
+    st.write("Choose a photo or video and an image to use as its replacement background.")
 
     background_file = st.file_uploader(
         "Choose a background image",
         type=("png", "jpg", "jpeg", "webp", "bmp"),
     )
-    video_file = st.file_uploader(
-        "Choose a recorded video",
-        type=("mp4", "mov", "avi", "mkv", "webm"),
+    media_type = st.radio(
+        "Media type",
+        ("Video", "Photo"),
+        horizontal=True,
     )
-    if background_file is None or video_file is None:
-        st.info("Upload both files to process the video.")
+    media_file = st.file_uploader(
+        "Choose a photo" if media_type == "Photo" else "Choose a recorded video",
+        type=(
+            ("png", "jpg", "jpeg", "webp", "bmp")
+            if media_type == "Photo"
+            else ("mp4", "mov", "avi", "mkv", "webm")
+        ),
+        key=f"{media_type.lower()}_upload",
+    )
+    if background_file is None or media_file is None:
+        st.info(f"Upload a background image and a {media_type.lower()} to continue.")
         return
 
     background_data = np.frombuffer(background_file.getvalue(), dtype=np.uint8)
@@ -178,15 +207,52 @@ def main() -> None:
         st.error("The uploaded background file could not be decoded as an image.")
         return
 
+    st.image(background, channels="BGR", caption="Selected background")
+
+    if media_type == "Photo":
+        photo_bytes = media_file.getvalue()
+        fingerprint = hashlib.sha256(photo_bytes + background.tobytes()).hexdigest()
+        if st.session_state.get("processed_photo_fingerprint") != fingerprint:
+            st.session_state.pop("processed_photo", None)
+            st.session_state.pop("processed_photo_fingerprint", None)
+
+        if st.button("Replace background", type="primary", key="replace_photo"):
+            try:
+                model, device, input_size = get_model()
+                processed_photo = process_photo(
+                    photo_bytes,
+                    background,
+                    model,
+                    device,
+                    input_size,
+                )
+            except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
+                st.error(f"Could not process the uploaded photo: {error}")
+            else:
+                st.session_state["processed_photo"] = processed_photo
+                st.session_state["processed_photo_fingerprint"] = fingerprint
+                st.success(f"Photo processed on {device}.")
+
+        if st.session_state.get("processed_photo_fingerprint") == fingerprint:
+            processed_photo = st.session_state["processed_photo"]
+            st.subheader("Processed photo")
+            st.image(processed_photo, caption="Processed photo")
+            st.download_button(
+                "Download processed photo",
+                data=processed_photo,
+                file_name="background_replaced.png",
+                mime="image/png",
+            )
+        return
+
+    video_file = media_file
     video_bytes = video_file.getvalue()
     fingerprint = hashlib.sha256(video_bytes + background.tobytes()).hexdigest()
     if st.session_state.get("processed_video_fingerprint") != fingerprint:
         st.session_state.pop("processed_video", None)
         st.session_state.pop("processed_video_fingerprint", None)
 
-    st.image(background, channels="BGR", caption="Selected background")
-
-    if st.button("Replace background", type="primary"):
+    if st.button("Replace background", type="primary", key="replace_video"):
         progress = st.progress(0.0, text="Processing video frames...")
         try:
             model, device, input_size = get_model()
